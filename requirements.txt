@@ -7,3 +7,5 @@ pre - commit
 pytest
 PyJWT
 requests
+pymongo
+mysql-connector-python
