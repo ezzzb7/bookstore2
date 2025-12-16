@@ -173,3 +173,109 @@ class Seller(db_conn.DBConn):
                 conn.close()
                 
         return 200, "ok"
+
+    def ship_order(self, user_id: str, order_id: str) -> (int, str):
+        """卖家发货"""
+        conn = None
+        try:
+            conn = self.mysql_conn
+            cursor = conn.cursor()
+
+            # 检查订单是否存在
+            cursor.execute(
+                "SELECT store_id, status FROM orders WHERE order_id = %s",
+                (order_id,)
+            )
+            result = cursor.fetchone()
+            if result is None:
+                return error.error_invalid_order_id(order_id)
+            
+            store_id, status = result
+            
+            # 验证是否是该商店的卖家
+            cursor.execute(
+                "SELECT user_id FROM stores WHERE store_id = %s",
+                (store_id,)
+            )
+            store_result = cursor.fetchone()
+            if store_result is None:
+                return error.error_non_exist_store_id(store_id)
+            
+            seller_id = store_result[0]
+            if seller_id != user_id:
+                return error.error_authorization_fail()
+            
+            # 检查订单状态是否为已支付
+            if status != 'paid':
+                return 527, "订单状态不是已支付，无法发货"
+            
+            # 更新订单状态为已发货
+            cursor.execute(
+                "UPDATE orders SET status = 'shipped' WHERE order_id = %s",
+                (order_id,)
+            )
+            conn.commit()
+
+        finally:
+            if conn:
+                conn.close()
+        
+        return 200, "ok"
+
+    def query_store_orders(self, user_id: str, store_id: str) -> (int, str, list):
+        """查询商店的订单"""
+        conn = None
+        try:
+            conn = self.mysql_conn
+            cursor = conn.cursor()
+
+            # 验证是否是该商店的卖家
+            cursor.execute(
+                "SELECT user_id FROM stores WHERE store_id = %s",
+                (store_id,)
+            )
+            result = cursor.fetchone()
+            if result is None:
+                return error.error_non_exist_store_id(store_id) + ([],)
+            
+            seller_id = result[0]
+            if seller_id != user_id:
+                return error.error_authorization_fail() + ([],)
+            
+            # 查询商店的所有订单
+            cursor.execute(
+                "SELECT order_id, user_id, total_price, status, created_at "
+                "FROM orders WHERE store_id = %s ORDER BY created_at DESC",
+                (store_id,)
+            )
+            results = cursor.fetchall()
+            
+            orders = []
+            for order_id, buyer_id, total_price, status, created_at in results:
+                # 查询订单详情
+                cursor.execute(
+                    "SELECT book_id, quantity, price FROM order_details WHERE order_id = %s",
+                    (order_id,)
+                )
+                details = cursor.fetchall()
+                
+                order_info = {
+                    "order_id": order_id,
+                    "buyer_id": buyer_id,
+                    "total_price": float(total_price),
+                    "status": status,
+                    "created_at": created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                    "details": [
+                        {"book_id": book_id, "quantity": quantity, "price": float(price)}
+                        for book_id, quantity, price in details
+                    ]
+                }
+                orders.append(order_info)
+            
+            return 200, "ok", orders
+
+        finally:
+            if conn:
+                conn.close()
+        
+        return 200, "ok", []

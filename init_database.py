@@ -21,7 +21,7 @@ def init_mysql_database():
             host=os.getenv('MYSQL_HOST', 'localhost'),
             port=int(os.getenv('MYSQL_PORT', 3306)),
             user=os.getenv('MYSQL_USER', 'root'),
-            password=os.getenv('MYSQL_PASSWORD', 'password'),
+            password=os.getenv('MYSQL_PASSWORD', '123456'),
             charset='utf8mb4'
         )
         
@@ -68,10 +68,10 @@ def init_mysql_database():
                 publisher VARCHAR(200),
                 original_title VARCHAR(500),
                 translator VARCHAR(300),
-                pub_year VARCHAR(20),
+                pub_year VARCHAR(100),
                 pages INT,
                 price DECIMAL(10,2),
-                currency_unit VARCHAR(10),
+                currency_unit VARCHAR(50),
                 binding VARCHAR(50),
                 isbn VARCHAR(50),
                 tags VARCHAR(1000),

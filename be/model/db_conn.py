@@ -24,7 +24,7 @@ class DBConn:
                     'port': int(os.getenv('MYSQL_PORT', 3306)),
                     'database': os.getenv('MYSQL_DATABASE', 'bookstore'),
                     'user': os.getenv('MYSQL_USER', 'root'),
-                    'password': os.getenv('MYSQL_PASSWORD', 'password'),
+                    'password': os.getenv('MYSQL_PASSWORD', '123456'),
                     'charset': 'utf8mb4',
                     'collation': 'utf8mb4_unicode_ci',
                     'autocommit': True,

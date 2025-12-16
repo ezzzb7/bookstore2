@@ -38,7 +38,7 @@ def migrate_books_data():
         port=3306,
         database='bookstore',
         user='root',
-        password='password',
+        password='123456',
         charset='utf8mb4'
     )
     mysql_cursor = mysql_conn.cursor()
@@ -73,10 +73,10 @@ def migrate_books_data():
                     'publisher': (row['publisher'] or '')[:255],
                     'original_title': (row['original_title'] or '')[:500],
                     'translator': (row['translator'] or '')[:255],
-                    'pub_year': str(row['pub_year'] or '')[:50],
+                    'pub_year': str(row['pub_year'] or '')[:100],
                     'pages': int(row['pages']) if row['pages'] else None,
                     'price': float(row['price']) if row['price'] else None,
-                    'currency_unit': (row['currency_unit'] or '')[:20],
+                    'currency_unit': (row['currency_unit'] or '')[:50],
                     'binding': (row['binding'] or '')[:50],
                     'isbn': (row['isbn'] or '')[:50],
                     'tags': (row['tags'] or '')[:65535]  # TEXT类型，最大65535字节
