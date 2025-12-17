@@ -2,6 +2,12 @@
 ### 小组成员
 10235501452 肖璟仪
 10235501435 张凯诚
+
+**分工说明：**
+- **张凯诚（10235501435）**：负责实现前60%基础功能
+- **肖璟仪（10235501452）**：负责实现后40%附加功能以及对应的测试用例。
+- **共同完成**：数据库架构设计（从MongoDB到MySQL+MongoDB混合架构的迁移）、数据库优化（索引优化、全文搜索）、项目整体测试与调试、实验报告撰写。
+
 ### 1. 实验要求
 
 **功能**
@@ -79,17 +85,52 @@
 - Book 1:N OrderDetail（一本书可在多个订单中）
 #### 2.4 MySQL表结构设计（核心业务数据）
 
-| 集合名称       | 具体结构                                                                                                                                                       | 主键       |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| 用户集合       | user：<br> {<br>    "user_id": 用户ID<br>    "password": 用户密码<br>    "balance": 用户余额<br>    "token": 加密字符串（用户ID为密钥，HS256算法生成）<br>    "terminal": 登录终端信息<br> } | user_id  |
-| 商店店家个人信息集合 | user_store：<br> {<br>    "store_id": 商店ID<br>    "user_id": 用户ID<br> }                                                                                     | store_id |
-| 商店集合       | store：<br> {<br>    "store_id": 商店ID<br>    "book_stock_info": 书籍库存信息（数组）<br> }                                                                            | store_id |
-| 书籍库存信息     | "book_stock_info"：<br> {<br>    "book_id": 书籍ID<br>    "stock_level": 库存信息<br> }                                                                           | book_id  |
-| 书籍集合       | book：<br> {<br>    "book_id": 书籍ID<br>    "book_info": 书籍详细信息<br> }                                                                                        | book_id  |
-| 订单集合       | new_order：<br> {<br>    "order_id": 订单ID<br>    "user_id": 用户ID<br>    "store_id": 商店ID<br>    "create_time": 创建时间<br> }                                   | order_id |
-| 订单信息集合     | new_order_detail：<br> {<br>    "order_id": 订单ID<br>    "each_book_details": 一个订单内购买的书籍的信息（数组）<br> }                                                        | order_id |
-| 订单内书籍详情    | each_book_in_order_details：<br> {<br>    "book_id": 书籍ID<br>    "count": 订购数量<br>    "price": 单价<br> }                                                     | book_id  |
-#### 2.5 混合架构设计优势
+本项目采用MySQL存储核心业务数据，设计了6张关系型数据表。详细DDL见附录A。
+
+**表结构概览：**
+
+| 表名 | 说明 | 主键 | 主要字段 |
+|------|------|------|---------|
+| **users** | 用户表 | user_id | password, balance, token, terminal |
+| **stores** | 商店表 | store_id | user_id(FK) |
+| **books** | 图书表 | book_id | title, author, publisher, price, isbn, tags |
+| **store_inventory** | 库存表 | id | store_id(FK), book_id(FK), stock_level, store_price |
+| **orders** | 订单表 | order_id | user_id(FK), store_id(FK), total_price, status, created_at |
+| **order_details** | 订单详情表 | id | order_id(FK), book_id(FK), quantity, price |
+
+**关键设计说明：**
+
+1. **外键约束** - 保证数据完整性
+   - stores.user_id → users.user_id（级联删除）
+   - store_inventory → stores, books
+   - orders → users, stores
+   - order_details → orders（级联删除）, books
+
+2. **索引设计** - 优化查询性能
+   - 全文索引：books(title, author, tags) - 支持图书搜索
+   - 复合索引：orders(user_id, status, created_at) - 优化订单查询
+   - 复合索引：orders(status, created_at) - 支持超时订单查询
+   - 唯一索引：store_inventory(store_id, book_id) - 防止重复库存记录
+
+3. **订单状态管理**
+   - 使用ENUM类型：pending, paid, shipped, delivered, cancelled
+   - created_at字段自动记录时间戳，支持超时判断
+
+#### 2.5 MongoDB集合设计（BLOB数据）
+
+MongoDB存储图书的详细描述信息，避免影响MySQL查询性能。
+
+| 集合名 | 说明 | 主要字段 |
+|--------|------|---------|
+| **book_details** | 图书详细信息 | book_id, book_intro, author_intro, content, picture |
+
+**索引设计：**
+- book_id唯一索引
+- (book_intro, content, author_intro)文本索引，支持中文全文搜索
+
+**数据分离策略：** MySQL存储基本信息，MongoDB存储BLOB数据，通过book_id关联。
+
+#### 2.6 混合架构设计优势
 
 **1. 数据库选型合理，各司其职**
 
@@ -523,24 +564,49 @@ self.db.store.insert_one({
 
 **测试执行过程：**
 
-![测试执行过程1](attachment/test_run_1.png)
+![测试执行过程1](attachment/da57fd69e0545f871bf071e0bf7e076d.png)
 
-![测试执行过程2](attachment/test_run_2.png)
+![测试执行过程2](attachment/66360a7e7defa8113533350f976e8e33.png)
 
 **测试结果总览：**
 - 总测试用例数：75个
 - 全部通过：75 passed
 - 执行时间：338.62s
-- 代码覆盖率：**95%**
+- 代码覆盖率：**96%**
 
 **详细覆盖率统计：**
 
-![覆盖率详情](attachment/coverage_detail.png)
+![覆盖率详情](attachment/ce79b24b1649046cac9723cd875f7ce5.png)
 
-如图所示，所有测试用例全部通过，整体代码覆盖率达到95%。
-#### 4. 附加功能实现（40%）
+如图所示，所有测试用例全部通过，整体代码覆盖率达到96%。这是完成前60%基础功能时的测试结果。
 
-##### 4.1 订单流程扩展：发货与收货
+---
+
+## 4. 附加功能实现（40%）
+
+本部分实现后40%功能，包括：
+1. 实现后续的流程：发货 → 收货
+2. 搜索图书（关键字搜索、参数化搜索、分页、全文索引优化）
+3. 订单状态、订单查询和取消订单（包括超时自动取消）
+
+**实现工作概览：**
+
+| 类型 | 文件/模块 | 主要新增内容 |
+|------|----------|-------------|
+| 后端Model | be/model/buyer.py | receive_order, query_order, cancel_order, check_and_cancel_timeout_orders |
+| | be/model/seller.py | ship_order, query_store_orders |
+| | be/model/search.py | **新增搜索模块**（多范围搜索、分页、全文索引） |
+| 后端View | be/view/buyer.py, seller.py | 新增对应路由接口 |
+| | be/view/search.py | **新增搜索路由** |
+| | be/serve.py | 注册search蓝图 |
+| 前端Access | fe/access/buyer.py, seller.py | 新增对应访问方法 |
+| | fe/access/search.py | **新增Search类** |
+| 测试文件 | 7个测试文件 | test_ship_order, test_receive_order, test_query_order, test_cancel_order, test_timeout_order, test_search_books, test_additional_coverage |
+| API文档 | doc/additional_features.md | **新增完整API文档** |
+
+---
+
+### 4.1 订单流程扩展：发货与收货
 
 **4.1.1 卖家发货功能**
 
@@ -1245,14 +1311,14 @@ def query_store_orders(self, user_id: str, store_id: str) -> (int, str, list):
 - 设置`default_language="none"`支持中文
 - 使用相关度评分排序，提升搜索结果质量
 
-**性能对比：**
+**索引优化效果：**
 
-| 搜索方式 | 查询时间（10000+记录） | 索引使用 |
-|---------|---------------------|---------|
-| LIKE '%关键字%' | 800-1200ms | 无法使用索引 |
-| MySQL FULLTEXT | 50-100ms | 全文索引 |
-| MongoDB $regex | 1000-2000ms | 无法使用索引 |
-| MongoDB $text | 10-30ms | 文本索引 |
+| 搜索方式 | 索引使用 | 性能特点 |
+|---------|---------|---------|
+| LIKE '%关键字%' | 无法使用索引 | 全表扫描，数据量大时性能差 |
+| MySQL FULLTEXT | 全文索引 | 使用索引，性能显著提升 |
+| MongoDB $regex | 无法使用索引 | 全集合扫描，性能较差 |
+| MongoDB $text | 文本索引 | 使用索引，支持中文分词 |
 
 #### 5.3 事务处理保证数据一致性
 
@@ -1305,6 +1371,7 @@ except Exception:
 - `test_cancel_order.py` - **取消订单测试（新增）**
 - `test_timeout_order.py` - **超时订单测试（新增）**
 - `test_search_books.py` - **图书搜索测试（新增）**
+- `test_additional_coverage.py` - **附加覆盖率测试（新增）**
 - `test_bench.py` - 性能测试
 
 **运行测试命令：**
@@ -1463,32 +1530,25 @@ def test_repeat_pay(self):
   - 按标题搜索
   - 按作者搜索
   - 按标签搜索
-  - 按内容搜索
-  - 全站搜索
+  - 内容全文搜索
+  - 分页功能测试
   - 商店内搜索
-  - 分页测试
-  - 空关键字测试
+  - 全站搜索
+  - 空结果处理
+
+- `test_additional_coverage.py`: 多个补充测试用例
+  - 覆盖各模块边界情况
+  - 异常处理测试
+  - 提升代码覆盖率
+
 
 #### 6.3 整体测试覆盖率
 
 **测试覆盖率变化：**
-- 队友完成前60%基础功能时：**96%**
-- 完成后40%附加功能后：**95%**（新增代码增加了代码总量，部分边界情况未完全覆盖）
+- 完成前60%基础功能时：**96%**
+- 完成后40%附加功能后：**95%**（新增代码增加了代码总量）
 
-**代码覆盖率统计：**
-
-| 模块 | 覆盖率 | 未覆盖部分 |
-|------|--------|-----------|
-| be/model/user.py | 高 | 部分异常处理分支 |
-| be/model/buyer.py | 高 | 部分边界情况 |
-| be/model/seller.py | 高 | 部分异常处理分支 |
-| be/model/search.py | 高 | MongoDB连接失败分支 |
-| be/model/db_conn.py | 中 | 部分工具函数 |
-| be/view/*.py | 高 | - |
-| **总体覆盖率** | **95%** | - |
-
-**测试运行结果：**
-所有测试用例通过，代码覆盖率95%
+测试覆盖率详情见"最终测试结果"部分的截图。所有测试用例全部通过，代码覆盖率达到95%。
 
 ---
 
@@ -1496,45 +1556,35 @@ def test_repeat_pay(self):
 
 **主要改进方向：**
 
-1. **ER图缺失**  **必须补充**
-   - 当前报告缺少规范的ER图
+ **ER图未绘制**
+   - 当前2.3节只有文字描述，缺少实际的ER图
    - 需要使用工具绘制完整的实体关系图
    - 包含所有实体（User、Store、Book、Order等）和关系
 
-2. **MySQL表结构描述需修正**  **必须修正**
-   - 报告2.4节仍使用MongoDB集合的描述方式
-   - 应该展示真实的MySQL表结构DDL
-   - 需要说明主键、外键、索引设计
-
-3. **规范化分析缺失**  **建议补充**
-   - 未对数据库设计进行规范化分析
-   - 应说明各表满足第几范式（1NF、2NF、3NF）
-   - 解释反规范化的理由（如有）
-
-4. **重复支付幂等性问题**  **建议修复**
+ **重复支付幂等性问题**
    - `payment()`方法未检查订单是否已支付
    - 可能导致重复扣款
    - 需要在支付前检查订单状态
-
-5. **库存并发控制问题**  **建议优化**
+. **库存并发控制问题**  **建议优化**
    - 下单时的库存扣减未加锁
    - 高并发下可能超卖
    - 建议使用乐观锁（条件更新）
 
-6. **数据库连接池未使用**
+ **数据库连接池未使用**
    - 每次操作都创建新连接并关闭
    - 高并发时性能差
    - 建议使用连接池（如mysql.connector.pooling）
 
-7. **测试边界情况覆盖不足**
+**测试边界情况覆盖不足**
    - 缺少并发测试（多用户抢购）
    - 缺少大数据量测试
    - 缺少异常情况测试（数据库中断等）
 
-8. **性能测试报告不完整**
+**性能测试报告不完整**
    - `test_bench.py`未详细说明测试场景
    - 缺少TPS、响应时间等指标
    - 缺少优化前后对比
+
 
 
 ## 附录
@@ -1647,7 +1697,8 @@ db.book_details.createIndex(
 ---
 
 **小组成员：**
-- 10235501452 肖璟仪
-- 10235501435 张凯诚
+- 10235501452 肖璟仪（负责后40%附加功能）
+- 10235501435 张凯诚（负责前60%基础功能）
+- 共同完成：数据库架构设计与优化、项目整体测试与调试、实验报告撰写
 
-**提交日期：** 2025年12月16日 
+**仓库链接：** https://github.com/ezzzb7/bookstore2
