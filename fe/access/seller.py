@@ -52,3 +52,24 @@ class Seller:
         headers = {"token": self.token}
         r = requests.post(url, headers=headers, json=json)
         return r.status_code
+
+    def ship_order(self, order_id: str) -> int:
+        json = {
+            "user_id": self.seller_id,
+            "order_id": order_id,
+        }
+        url = urljoin(self.url_prefix, "ship_order")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        return r.status_code
+
+    def query_store_orders(self, store_id: str) -> (int, list):
+        json = {
+            "user_id": self.seller_id,
+            "store_id": store_id,
+        }
+        url = urljoin(self.url_prefix, "query_store_orders")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        response_json = r.json()
+        return r.status_code, response_json.get("orders", [])
