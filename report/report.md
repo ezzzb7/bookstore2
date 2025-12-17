@@ -4,8 +4,8 @@
 10235501435 张凯诚
 
 **分工说明：**
-- **张凯诚（10235501435）**：负责实现前60%基础功能
-- **肖璟仪（10235501452）**：负责实现后40%附加功能以及对应的测试用例。
+- **张凯诚**：负责实现前60%基础功能
+- **肖璟仪**：负责实现后40%附加功能以及对应的测试用例。
 - **共同完成**：数据库架构设计（从MongoDB到MySQL+MongoDB混合架构的迁移）、数据库优化（索引优化、全文搜索）、项目整体测试与调试、实验报告撰写。
 
 ### 1. 实验要求
@@ -35,8 +35,8 @@
 - 取消定单可由买家主动地取消定单，或者买家下单后，经过一段时间超时仍未付款，定单也会自动取消。 
 ### 2. 混合数据库架构设计
 #### 2.0 从文档型数据库到混合架构的演进
-##### 2.0.1 原始设计（纯MongoDB）
-最初的bookstore项目使用纯MongoDB文档数据库，所有数据（用户、订单、库存、图书信息）都存储在MongoDB中。
+##### 2.0.1 文档型数据库
+第一次作业的bookstore项目使用纯MongoDB文档数据库，所有数据（用户、订单、库存、图书信息）都存储在MongoDB中。
 
 **存在的问题：**
 1. **缺乏事务支持**：MongoDB在4.0之前不支持多文档事务，订单创建、库存扣减、余额变动无法保证原子性
@@ -66,8 +66,8 @@
 | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **基础功能：**<br>- 注册(register)<br>- 登录(login)<br>- 登出(logout)<br>- 注销(unregister)<br><br> | **基础功能：**<br>- 账户充值(add_funds)<br>- 创建订单(new_order)<br>- 订单付款(payment)<br><br>                                                                                                                   | **基础功能：**<br>- 创建店铺(create_store)<br>- 添加图书(add_book)<br>- 库存管理(add_stock_level)<br> | **全文搜索索引：**(`create_search_indexes`)<br>- 覆盖字段：title/author/tags/content<br>- 核心能力：中文分词、模糊匹配<br>                                                                                     |
 | **扩展功能：**<br>- 修改密码(change_password)                                                   | **扩展功能：**<br>- 订单查询(search_order)<br>- 取消订单(cancel_order)<br>- 自动取消(trigger_auto_cancel)<br>- 确认收货(receive_order)<br>- 图书搜索(search_books)<br>- 高级搜索(advanced_search)<br>- 热门图书(search_hot_books) | **扩展功能：**<br>- 订单发货(ship_order)<br>- 资金管理(add_funds)                                 | **数据库管理：**<br>- MySQL连接池管理<br>- MongoDB连接管理<br>- user_id_exist()<br>- store_id_exist()<br>- book_id_exist()<br><br>**索引优化：**<br>- MySQL全文索引(FULLTEXT)<br>- 订单状态和时间复合索引<br>- 外键索引自动创建 |
-#### 2.3 ER图设计（全做完再搞）
-
+#### 2.3 ER图设计
+![](attachment/1db271cec2e7c175d23b0eca76eb6a82.png)
 **实体及属性：**
 - **User（用户）**：user_id(PK), password, balance, token, terminal
 - **Store（商店）**：store_id(PK), user_id(FK), store_name, description
@@ -85,9 +85,9 @@
 - Book 1:N OrderDetail（一本书可在多个订单中）
 #### 2.4 MySQL表结构设计（核心业务数据）
 
-本项目采用MySQL存储核心业务数据，设计了6张关系型数据表。详细DDL见附录A。
+本项目采用MySQL存储核心业务数据，设计6张关系型数据表。详细DDL见附录A。
 
-**表结构概览：**
+**表结构：**
 
 | 表名 | 说明 | 主键 | 主要字段 |
 |------|------|------|---------|
@@ -98,7 +98,7 @@
 | **orders** | 订单表 | order_id | user_id(FK), store_id(FK), total_price, status, created_at |
 | **order_details** | 订单详情表 | id | order_id(FK), book_id(FK), quantity, price |
 
-**关键设计说明：**
+**设计说明：**
 
 1. **外键约束** - 保证数据完整性
    - stores.user_id → users.user_id（级联删除）
@@ -160,86 +160,150 @@ MySQL的事务机制确保订单创建、支付、库存扣减等操作的原子
 **5. 数据分离与解耦**
 
 图书基础信息（标题、作者、价格等）存储在MySQL，详细描述、图片等BLOB数据存储在MongoDB。查询库存和订单时无需加载大字段，提升查询效率。
-### 3. 基本功能实现（60%)
-#### 3.0 数据库迁移实现
-为了创建本地 MongoDB 数据库，并将`bookstore/fe/data/book_lx.db`中的内容以合适的形式存入本地数据库"，我们设计并实现了数据迁移脚本 `migrate_sqlite_to_mongo.py`。
-##### 3.0.1 数据源连接
-首先，我们要建立与SQLite源数据库和MongoDB目标数据库的连接：
-```python
-import sqlite3
-from pymongo import MongoClient
-sqlite_conn = sqlite3.connect('./fe/data/book_lx.db')
-sqlite_cursor = sqlite_conn.cursor()
-mongo_client = MongoClient('localhost', 27017) 
-```
-##### 3.0.2 MongoDB环境初始化
-然后，我们实现了MongoDB环境的智能初始化。脚本检测是否已存在`bookstore`数据库，如存在则先删除以确保迁移环境的干净性，然后创建新的`bookstore`数据库和`book`集合，保证了迁移过程的幂等性：
-```python
-db_list = mongo_client.list_database_names()
-if 'bookstore' in db_list:
-    mongo_client.drop_database('bookstore')
-    print("Existing 'bookstore' database found and deleted.")
-db = mongo_client['bookstore']  
-book_collection = db['book'] 
-```
-##### 3.0.3数据转换与迁移
-这是核心的数据转换逻辑。严格按照README中提供的DDL定义了17个字段的映射关系，确保原有数据结构的完整保留。逐行读取SQLite数据并转换为MongoDB文档格式，完成从关系型数据库到文档型数据库的架构升级，最后妥善关闭连接。
-```python
-sqlite_cursor.execute("SELECT * FROM book")
-rows = sqlite_cursor.fetchall()
 
-columns = [
-    "id", "title", "author", "publisher", "original_title", "translator", 
-    "pub_year", "pages", "price", "currency_unit", "binding", "isbn", 
-    "author_intro", "book_intro", "content", "tags", "picture"
-]
-for row in rows:
-    book_document = {columns[i]: row[i] for i in range(len(columns))}
-    book_collection.insert_one(book_document) 
+### 3. 基本功能实现（60%）
+#### 3.0 数据库初始化与数据迁移
 
-sqlite_conn.close()
-mongo_client.close()
-print("successfully transfer")
+本项目采用MySQL+MongoDB混合架构，需要进行数据库初始化和数据迁移。我们设计并实现了两个脚本：`init_database.py`（数据库初始化）和`migrate_to_mysql.py`（数据迁移）。
+
+##### 3.0.1 数据库初始化（init_database.py）
+
+首先，需要初始化MySQL数据库结构，创建所有业务表：
+
+```python
+def init_mysql_database():
+    """初始化MySQL数据库和表结构"""
+    conn = mysql.connector.connect(
+        host=os.getenv('MYSQL_HOST', 'localhost'),
+        port=int(os.getenv('MYSQL_PORT', 3306)),
+        user=os.getenv('MYSQL_USER', 'root'),
+        password=os.getenv('MYSQL_PASSWORD', '123456'),
+        charset='utf8mb4'
+    )
+    cursor = conn.cursor()
+    
+    # 创建数据库
+    cursor.execute("CREATE DATABASE IF NOT EXISTS bookstore CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+    cursor.execute("USE bookstore")
 ```
-##### 迁移效果
-![](attachment/36705de4563660b3d0c2fedcd1c71d3b.jpg)
-执行脚本后成功将SQLite中的40000+条图书记录完整迁移至MongoDB，实现了要求第1点的核心任务：创建本地MongoDB数据库并将原有数据以合适形式存入。后续系统的所有数据读写操作都将在本地MongoDB数据库中进行。
+
+创建用户表、商店表、图书表、库存表、订单表等核心业务表，并设置外键约束和索引。同时初始化MongoDB用于存储BLOB数据：
+
+```python
+def init_mongodb():
+    """初始化MongoDB数据库和集合"""
+    client = MongoClient('localhost', 27017)
+    db = client['bookstore_blobs']
+    
+    # 创建book_details集合的索引
+    book_details = db['book_details']
+    book_details.create_index([("book_id", 1)], unique=True)
+    book_details.create_index([
+        ("author_intro", "text"),
+        ("book_intro", "text"),
+        ("content", "text")
+    ])
+```
+
+##### 3.0.2 数据迁移实现（migrate_to_mysql.py）
+
+从SQLite源数据库读取图书数据，将基础信息迁移到MySQL，BLOB数据迁移到MongoDB：
+
+```python
+def migrate_books_data():
+    """迁移图书数据：基础信息到MySQL，BLOB数据到MongoDB"""
+    
+    # 连接源SQLite数据库
+    sqlite_conn = sqlite3.connect(SQLITE_DB_PATH)
+    sqlite_conn.row_factory = sqlite3.Row
+    sqlite_cursor = sqlite_conn.cursor()
+    
+    # 连接目标MySQL
+    mysql_conn = mysql.connector.connect(
+        host='localhost', port=3306, database='bookstore',
+        user='root', password='123456', charset='utf8mb4'
+    )
+    mysql_cursor = mysql_conn.cursor()
+    
+    # 连接目标MongoDB (blob数据库)
+    mongo_client = MongoClient('localhost', 27017)
+    mongo_db = mongo_client['bookstore_blobs']
+```
+
+对每条图书记录，将基础信息存入MySQL，BLOB数据存入MongoDB：
+
+```python
+    for row in sqlite_cursor:
+        # 准备MySQL数据(基础信息)
+        mysql_data = {
+            'book_id': (row['id'] or '')[:255],
+            'title': (row['title'] or '')[:500],
+            'author': (row['author'] or '')[:255],
+            # ... 其他字段
+        }
+        
+        # 插入到MySQL
+        mysql_cursor.execute(insert_sql, mysql_data)
+        
+        # 准备MongoDB数据（BLOB信息）
+        blob_data = {
+            'book_id': book_id,
+            'author_intro': row['author_intro'] or '',
+            'book_intro': row['book_intro'] or '',
+            'content': row['content'] or '',
+            'picture': row['picture'],  # BLOB数据
+        }
+        
+        # 插入到MongoDB (upsert)
+        mongo_db['book_details'].replace_one(
+            {'book_id': book_id}, blob_data, upsert=True
+        )
+```
+
+##### 3.0.3 迁移效果
+
+执行脚本后成功将SQLite中的40000+条图书记录完整迁移：
+- **MySQL**：存储图书基础信息（title, author, price等12个字段）
+- **MongoDB**：存储BLOB数据（author_intro, book_intro, content, picture等大字段）
+
+这种混合架构实现了数据分离，避免大字段影响MySQL查询性能。
 
 #### 3.1 用户权限接口
-该部分实现在 `/be/model/user.py` 中，提供了 `User` 类：
+该部分实现在 `/be/model/user.py` 中，提供了 `User` 类：
 
 ```python
 class User(db_conn.DBConn):
 ```
 ##### 3.1.1 注册 
 ```python
-    def register(self, user_id: str, password: str) -> (int, str):
+    def register(self, user_id: str, password: str):
 ```
 首先，注册函数会检查用户是否已存在。如果已存在，则返回错误信息。
 ```python
-exist = self.db.user.find_one({"user_id": user_id})
-if exist is not None:
+if self.user_id_exist(user_id):
     return error.error_exist_user_id(user_id)
 ```
-如果用户不存在，则生成一个新的终端标识和 token，并将用户信息插入数据库。插入内容包括用户ID、密码、余额、token 和终端信息。
+如果用户不存在，则生成一个新的终端标识和 token，并将用户信息插入MySQL数据库。插入内容包括用户ID、密码、余额、token 和终端信息。
 ```python
 terminal = "terminal_{}".format(str(time.time()))
 token = jwt_encode(user_id, terminal)
-self.db.user.insert_one({
-    "user_id": user_id,
-    "password": password,
-    "balance": 0,
-    "token": token,
-    "terminal": terminal,
-})
+
+conn = self.mysql_conn
+cursor = conn.cursor()
+cursor.execute(
+    """INSERT INTO users (user_id, password, balance, token, terminal) 
+       VALUES (%s, %s, %s, %s, %s)""",
+    (user_id, password, 0.00, token, terminal)
+)
+conn.commit()
 ```
 
 最后，返回注册成功的状态码和信息。
 
 ---
-##### 3.1.2 注销功能 
+##### 3.1.2 注销功能 
 ```python
-    def unregister(self, user_id: str, password: str) -> (int, str):
+    def unregister(self, user_id: str, password: str) -> (int, str):
 ```
 注销时，首先校验用户密码。如果密码错误，则返回错误。
 ```python
@@ -247,42 +311,52 @@ code, message = self.check_password(user_id, password)
 if code != 200:
     return code, message
 ```
-如果密码正确，则从数据库中删除该用户文档。
+如果密码正确，则从MySQL数据库中删除该用户记录。
 ```python
-exist = self.db.user.delete_one({"user_id": user_id})
-if exist is None:
+conn = self.mysql_conn
+cursor = conn.cursor()
+cursor.execute("DELETE FROM users WHERE user_id = %s", (user_id,))
+if cursor.rowcount == 0:
     return error.error_authorization_fail()
+conn.commit()
 ```
 最后，返回注销成功的状态码和信息。
 
 ---
-##### 3.1.3 登录功能 
+##### 3.1.3 登录功能 
 ```python
-     def login(self, user_id: str, password: str, terminal: str) -> (int, str, str):
+     def login(self, user_id: str, password: str, terminal: str) -> (int, str, str):
 ```
 登录时，首先校验用户密码是否正确。如果密码错误，则直接返回错误。
 
 ```python
 code, message = self.check_password(user_id, password)
 if code != 200:
-    return code, message, ""
+    return code, message, ""
 ```
 
-如果密码正确，则生成新的 token，并更新数据库中的 token 和终端信息。
+如果密码正确，则生成新的 token，并使用SQL UPDATE语句更新数据库中的 token 和终端信息。
 
 ```python
 token = jwt_encode(user_id, terminal)
-exist = self.db.user.update_one({"user_id": user_id}, {"$set": {"token": token, "terminal": terminal}})
-if exist.modified_count == 0:
-    return error.error_authorization_fail() + ("",)
+
+conn = self.mysql_conn
+cursor = conn.cursor()
+cursor.execute(
+    "UPDATE users SET token = %s, terminal = %s WHERE user_id = %s",
+    (token, terminal, user_id)
+)
+if cursor.rowcount == 0:
+    return error.error_authorization_fail() + ("",)
+conn.commit()
 ```
 
 最后，返回登录成功的状态码、信息和新 token。
 
 ---
-##### 3.1.4 登出功能 
+##### 3.1.4 登出功能 
 ```python
-    def logout(self, user_id: str, token: str) -> bool:
+    def logout(self, user_id: str, token: str) -> (int, str):
 ```
 登出时，首先校验当前 token 是否有效。如果无效，则返回错误。
 ```python
@@ -290,18 +364,25 @@ code, message = self.check_token(user_id, token)
 if code != 200:
     return code, message
 ```
-如果 token 有效，则生成一个新的 dummy token 和终端标识，更新数据库，使原 token 失效。
+如果 token 有效，则生成一个新的 dummy token 和终端标识，使用SQL UPDATE更新数据库，使原 token 失效。
 ```python
 terminal = "terminal_{}".format(str(time.time()))
 dummy_token = jwt_encode(user_id, terminal)
-exist = self.db.user.update_one({"user_id": user_id}, {"$set": {"token": dummy_token, "terminal": terminal}})
-if exist.modified_count == 0:
-    return error.error_authorization_fail() + ("",)
+
+conn = self.mysql_conn
+cursor = conn.cursor()
+cursor.execute(
+    "UPDATE users SET token = %s, terminal = %s WHERE user_id = %s",
+    (dummy_token, terminal, user_id)
+)
+if cursor.rowcount == 0:
+    return error.error_authorization_fail()
+conn.commit()
 ```
 最后，返回登出成功的状态码和信息。
 
 ---
-##### 3.1.5 修改密码功能 
+##### 3.1.5 修改密码功能 
 
 修改密码时，首先校验旧密码。如果旧密码错误，则返回错误。
 ```python
@@ -309,178 +390,198 @@ code, message = self.check_password(user_id, old_password)
 if code != 200:
     return code, message
 ```
-如果旧密码正确，则生成新的 token 和终端标识，并将新密码、token 和终端信息更新到数据库。
+如果旧密码正确，则生成新的 token 和终端标识，并使用SQL UPDATE将新密码、token 和终端信息更新到MySQL数据库。
 ```python
 terminal = "terminal_{}".format(str(time.time()))
 token = jwt_encode(user_id, terminal)
-exist = self.db.user.update_one({"user_id": user_id},
-                         {"$set": {"password": new_password, "token": token, "terminal": terminal}})
-if exist.modified_count == 0:
+
+conn = self.mysql_conn
+cursor = conn.cursor()
+cursor.execute(
+    "UPDATE users SET password = %s, token = %s, terminal = %s WHERE user_id = %s",
+    (new_password, token, terminal, user_id)
+)
+if cursor.rowcount == 0:
     return error.error_authorization_fail()
+conn.commit()
 ```
 最后，返回修改密码成功的状态码和信息。
 
 #### 3.2 买家用户接口
-该部分实现在 `/be/model/buyer.py` 中，提供了 `Buyer` 类：
+该部分实现在 `/be/model/buyer.py` 中，提供了 `Buyer` 类：
 ```python
 class Buyer(db_conn.DBConn):
 ```
-##### 3.2.1 下单功能 
+##### 3.2.1 下单功能 
 ```python
-    def new_order(self, user_id: str, store_id: str, id_and_count: [(str, int)]) -> (int, str, str):
+    def new_order(self, user_id: str, store_id: str, id_and_count: [(str, int)]) -> (int, str, str):
 ```
 首先，函数会校验用户和商店是否存在。如果用户或商店不存在，则直接返回错误。
 ```python
-user = self.db.user.find_one({"user_id": user_id})
-if user is None:
+if not self.user_id_exist(user_id):
     return error.error_non_exist_user_id(user_id) + (order_id,)
-
-if self.store_id_exist(store_id) is False:
+if not self.store_id_exist(store_id):
     return error.error_non_exist_store_id(store_id) + (order_id,)
 ```
-接着，为订单生成唯一的 order_id并遍历每本书，校验库存是否充足。如果库存不足或书籍不存在，则返回错误。
+接着，为订单生成唯一的 order_id，并通过SQL查询遍历每本书，校验库存是否充足。如果库存不足或书籍不存在，则返回错误。
 ```python
 uid = "{}_{}_{}".format(user_id, store_id, str(uuid.uuid1()))
-each_book_in_order_details = []
+order_id = uid
+
+conn = self.mysql_conn
+cursor = conn.cursor()
+
 for book_id, count in id_and_count:
-    result = self.db.store.find_one(
-        {"store_id": store_id,"book_stock_info.book_id": book_id},
-        {"book_stock_info.$": 1}
+    # 检查商店中是否有此书及库存
+    cursor.execute(
+        "SELECT stock_level, store_price FROM store_inventory "
+        "WHERE store_id = %s AND book_id = %s",
+        (store_id, book_id)
     )
+    result = cursor.fetchone()
     if result is None:
         return error.error_non_exist_book_id(book_id) + (order_id,)
-    stock_level = result["book_stock_info"][0]["stock_level"]
-    price = self.get_book_price(book_id)
+    
+    stock_level, price = result
     if stock_level < count:
         return error.error_stock_level_low(book_id) + (order_id,)
 ```
-如果库存充足，则更新库存，并将书籍详情添加到订单详情数组。
+如果库存充足，则使用MySQL事务进行订单创建、订单详情插入和库存扣减操作，保证原子性。
 ```python
-condition = {
-    "store_id": store_id, 
-    "book_stock_info.book_id": book_id, 
-    "book_stock_info.stock_level": {'$gte': count}
-}
-self.db.store.update_one(
-    condition, 
-    {"$inc": {"book_stock_info.$.stock_level": -1}}
+# 开始事务
+conn.start_transaction()
+
+# 创建订单
+cursor.execute(
+    "INSERT INTO orders (order_id, user_id, store_id, total_price, status) "
+    "VALUES (%s, %s, %s, %s, %s)",
+    (order_id, user_id, store_id, total_price, 'pending')
 )
-each_book_in_order_details.append({
-    "book_id": book_id,
-    "count": count,
-    "price": price
-})
-```
-最后，将订单详情和订单主信息分别插入到new_order_detail 和 new_order集合，并返回订单号。
-```python
-new_order_detail = {
-    "order_id": uid,
-    "each_book_details": each_book_in_order_details
-}
-self.db.new_order_detail.insert_one(new_order_detail)
-new_order = {
-    "order_id": uid,
-    "user_id": user_id,
-    "store_id": store_id,
-    "create_time": datetime.now(),
-}
-self.db.new_order.insert_one(new_order)
-order_id = uid
+
+# 创建订单详情和减少库存
+for book_id, count, price in order_books:
+    cursor.execute(
+        "INSERT INTO order_details (order_id, book_id, quantity, price) "
+        "VALUES (%s, %s, %s, %s)",
+        (order_id, book_id, count, price)
+    )
+    
+    cursor.execute(
+        "UPDATE store_inventory SET stock_level = stock_level - %s "
+        "WHERE store_id = %s AND book_id = %s",
+        (count, store_id, book_id)
+    )
+
+conn.commit()
 ```
 
 ---
-##### 3.2.2 支付功能 
+##### 3.2.2 支付功能 
 ```python
-    def payment(self, user_id: str, password: str, order_id: str) -> (int, str):
+    def payment(self, user_id: str, password: str, order_id: str) -> (int, str):
 ```
-首先，函数会校验订单是否存在，并获取订单相关信息。如果订单不存在或用户不匹配，则返回错误。
+首先，函数会通过SQL查询订单是否存在，并获取订单相关信息。如果订单不存在或状态不正确，则返回错误。
 ```python
-order_info = self.db.new_order.find_one({"order_id": order_id})
-if order_info is None:
+conn = self.mysql_conn
+cursor = conn.cursor()
+
+cursor.execute(
+    "SELECT user_id, store_id, total_price, status FROM orders WHERE order_id = %s",
+    (order_id,)
+)
+order_result = cursor.fetchone()
+buyer_id, store_id, total_price, status = order_result
+
+if status != 'pending':
     return error.error_invalid_order_id(order_id)
-order_id = order_info["order_id"]
-buyer_id = order_info["user_id"]
-store_id = order_info["store_id"]
-if buyer_id != user_id:
-    return error.error_authorization_fail()
 ```
-然后，校验买家信息和密码，获取余额，并校验商店和卖家信息。
+然后，校验买家身份和密码，获取余额，并校验商店和卖家信息。
 ```python
-usr_info = self.db.user.find_one({"user_id": buyer_id})
-if usr_info is None:
-    return error.error_non_exist_user_id(buyer_id)
-balance = usr_info["balance"]
-if password != usr_info["password"]:
+cursor.execute(
+    "SELECT password, balance FROM users WHERE user_id = %s",
+    (buyer_id,)
+)
+user_result = cursor.fetchone()
+stored_password, balance = user_result
+if password != stored_password:
     return error.error_authorization_fail()
-store_info = self.db.user_store.find_one({"store_id": store_id})
-if  store_info is None:
-    return error.error_non_exist_store_id(store_id)
-seller_id = store_info["user_id"]
-if not self.user_id_exist(seller_id):
-    return error.error_non_exist_user_id(seller_id)
-```
-接着，计算订单总价，判断余额是否足够。
-```python
-new_order_details_info = self.db.new_order_detail.find({"order_id": order_id})
-total_price = 0
-for order_detail in new_order_details_info:
-    for book in order_detail["each_book_details"]:
-        total_price += book["price"] * book["count"]
+
 if balance < total_price:
     return error.error_not_sufficient_funds(order_id)
 ```
-最后，扣除买家余额，增加卖家余额，并返回支付结果。
+最后，使用MySQL事务完成扣款、收款和订单状态更新，保证支付过程的原子性。
 ```python
-result = self.db.user.update_many(
-    {"user_id": buyer_id, "balance": {"$gte": total_price}},
-    {"$inc": {"balance": -total_price}}
+# 查找卖家ID
+cursor.execute(
+    "SELECT user_id FROM stores WHERE store_id = %s",
+    (store_id,)
 )
-if result.modified_count == 0:
-    return error.error_not_sufficient_funds(order_id)
-result = self.db.user.update_many(
-    {"user_id": seller_id},
-    {"$inc": {"balance": total_price}}
+seller_id = cursor.fetchone()[0]
+
+# 开始事务进行支付
+conn.start_transaction()
+
+# 从买家账户扣款
+cursor.execute(
+    "UPDATE users SET balance = balance - %s WHERE user_id = %s",
+    (total_price, buyer_id)
 )
-if result.modified_count == 0:
-    return error.error_not_sufficient_funds(order_id)
-if result.matched_count == 0:
-    return error.error_invalid_order_id(order_id)
+
+# 向卖家账户加款
+cursor.execute(
+    "UPDATE users SET balance = balance + %s WHERE user_id = %s",
+    (total_price, seller_id)
+)
+
+# 更新订单状态为已支付
+cursor.execute(
+    "UPDATE orders SET status = 'paid' WHERE order_id = %s",
+    (order_id,)
+)
+
+conn.commit()
 ```
 ---
-### 3.2.3 充值功能
+##### 3.2.3 充值功能
 ```python
-    def add_funds(self, user_id, password, add_value) -> (int, str):
+    def add_funds(self, user_id, password, add_value) -> (int, str):
 ```
-首先，校验用户信息和密码是否正确。
+首先，通过SQL查询验证用户身份和密码是否正确。
 ```python
-user_info = self.db.user.find_one({"user_id": user_id})
-if user_info is None:
-    return error.error_authorization_fail()
-if user_info.get("password") != password:
-    return error.error_authorization_fail()
-```
-然后，更新用户余额，增加充值金额。
-```python
-exist = self.db.user.update_one({"user_id": user_id}, {"$inc": {"balance": add_value}})
-if exist.matched_count == 0:
+conn = self.mysql_conn
+cursor = conn.cursor()
+
+cursor.execute(
+    "SELECT password FROM users WHERE user_id = %s",
+    (user_id,)
+)
+result = cursor.fetchone()
+if result is None:
     return error.error_non_exist_user_id(user_id)
+
+stored_password = result[0]
+if stored_password != password:
+    return error.error_authorization_fail()
+```
+然后，使用SQL UPDATE更新用户余额，增加充值金额。
+```python
+cursor.execute(
+    "UPDATE users SET balance = balance + %s WHERE user_id = %s",
+    (add_value, user_id)
+)
+conn.commit()
 ```
 最后，返回充值结果。
 #### 3.3 卖家用户接口
-该部分实现在 `/be/model/seller.py` 中，提供了 `Seller` 类：
+该部分实现在 `/be/model/seller.py` 中，提供了 `Seller` 类：
 ```python
 class Seller(db_conn.DBConn):
 ```
-##### 3.3.1 添加书籍功能 
+##### 3.3.1 添加书籍功能 
 ```python
-    def add_book(
-        self,
-        user_id: str,
-        store_id: str,
-        book_id: str,
-        book_json_str: str,
-        stock_level: int,
-    ):
+    def add_book(
+        self, user_id: str, store_id: str, book_id: str, book_json_str: str, stock_level: int,
+    ):
 ```
 首先，函数会校验用户、商店是否存在，以及该书籍是否已存在于商店库存。如果有任何一项不存在或书籍已存在，则返回对应错误。
 ```python
@@ -491,28 +592,50 @@ if not self.store_id_exist(store_id):
 if self.book_id_exist(store_id, book_id):
     return error.error_exist_book_id(book_id)
 ```
-通过后，向指定商店的 `book_stock_info` 数组中添加一本新书及其库存信息。
+通过后，解析图书JSON信息，使用MySQL事务将图书基础信息存入books表，库存信息存入store_inventory表，BLOB数据存入MongoDB。
 ```python
-self.db.store.update_one(
-    {"store_id": store_id},
-    {
-        "$push": {
-            "book_stock_info": {
-                "book_id": book_id,
-                "stock_level": stock_level
-            }
-        }
-    }
+book_info = json.loads(book_json_str)
+conn = self.mysql_conn
+cursor = conn.cursor()
+
+# 开始事务
+conn.start_transaction()
+
+# 添加图书基础信息到MySQL
+cursor.execute("""
+    INSERT INTO books (book_id, title, author, publisher, original_title, translator, 
+                       pub_year, pages, price, currency_unit, binding, isbn)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    ON DUPLICATE KEY UPDATE 
+        title = VALUES(title),
+        author = VALUES(author),
+        ...
+""", (book_id, title, author, publisher, ...))
+
+# 添加库存信息到MySQL
+cursor.execute("""
+    INSERT INTO store_inventory (store_id, book_id, stock_level, store_price)
+    VALUES (%s, %s, %s, %s)
+""", (store_id, book_id, stock_level, price))
+
+# 添加BLOB数据到MongoDB
+mongo_db = self.mongo_db
+mongo_db.book_details.update_one(
+    {"book_id": book_id},
+    {"$set": {"book_intro": book_intro, "content": content, "tags": tags, "pictures": pictures}},
+    upsert=True
 )
+
+conn.commit()
 ```
 最后，返回添加成功的状态码和信息。
 
 ---
-##### 3.3.2 增加库存功能 
+##### 3.3.2 增加库存功能 
 ```python
-    def add_stock_level(
-        self, user_id: str, store_id: str, book_id: str, add_stock_level: int
-    ):
+    def add_stock_level(
+        self, user_id: str, store_id: str, book_id: str, add_stock_level: int
+    ):
 ```
 首先，校验用户、商店和书籍是否存在。如果有任何一项不存在，则返回对应错误。
 ```python
@@ -523,20 +646,28 @@ if not self.store_id_exist(store_id):
 if not self.book_id_exist(store_id, book_id):
     return error.error_non_exist_book_id(book_id)
 ```
-校验通过后，更新指定商店和书籍的库存数量，使用 `$inc` 操作符实现库存的增加。
+校验通过后，使用SQL UPDATE更新指定商店和书籍的库存数量。
 ```python
-exist = self.db.store.update_one(
-    {"store_id": store_id, "book_stock_info.book_id": book_id},
-    {"$inc": {"book_stock_info.$.stock_level": add_stock_level}}
+conn = self.mysql_conn
+cursor = conn.cursor()
+
+cursor.execute(
+    "UPDATE store_inventory SET stock_level = stock_level + %s "
+    "WHERE store_id = %s AND book_id = %s",
+    (add_stock_level, store_id, book_id)
 )
-assert exist.modified_count > 0
+
+if cursor.rowcount == 0:
+    return error.error_non_exist_book_id(book_id)
+
+conn.commit()
 ```
 最后，返回增加库存成功的状态码和信息。
 
 ---
-##### 3.3.3 创建商店功能 
+##### 3.3.3 创建商店功能 
 ```python
-    def create_store(self, user_id: str, store_id: str) -> (int, str):
+    def create_store(self, user_id: str, store_id: str) -> tuple[int, str]:
 ```
 首先，校验用户是否存在，以及商店ID是否已被占用。如果用户不存在或商店已存在，则返回对应错误。
 ```python
@@ -545,40 +676,28 @@ if not self.user_id_exist(user_id):
 if self.store_id_exist(store_id):
     return error.error_exist_store_id(store_id)
 ```
-校验通过后，分别在user_store集合和store 集合中插入新商店信息。user_store记录商店与用户的关系，store 集合初始化商店库存为空数组。
+校验通过后，使用SQL INSERT在stores表中插入新商店记录，关联用户ID。
 ```python
-self.db.user_store.insert_one({
-    "store_id": store_id,
-    "user_id": user_id
-})
+conn = self.mysql_conn
+cursor = conn.cursor()
 
-self.db.store.insert_one({
-    "store_id":store_id,
-    "book_stock_info":[]
-})
+cursor.execute(
+    "INSERT INTO stores (store_id, user_id) VALUES (%s, %s)",
+    (store_id, user_id)
+)
+conn.commit()
 ```
 最后，返回创建商店成功的状态码和信息。
+
 ##### 3.4 运行测试结果
-
 在终端输入 `bash script/test.sh` 运行所有测试：
-
 **测试执行过程：**
+![](attachment/99608728f26b80f3a49ba7650c71fd54.png)
+**覆盖率统计：**
 
-![测试执行过程1](attachment/da57fd69e0545f871bf071e0bf7e076d.png)
+![](attachment/b8e81da78910d7b42b581fdec26b12e1.png)
 
-![测试执行过程2](attachment/66360a7e7defa8113533350f976e8e33.png)
-
-**测试结果总览：**
-- 总测试用例数：75个
-- 全部通过：75 passed
-- 执行时间：338.62s
-- 代码覆盖率：**96%**
-
-**详细覆盖率统计：**
-
-![覆盖率详情](attachment/ce79b24b1649046cac9723cd875f7ce5.png)
-
-如图所示，所有测试用例全部通过，整体代码覆盖率达到96%。这是完成前60%基础功能时的测试结果。
+所有测试用例全部通过，整体代码覆盖率达到96%。这是完成前60%基础功能时的测试结果。
 
 ---
 
@@ -591,18 +710,18 @@ self.db.store.insert_one({
 
 **实现工作概览：**
 
-| 类型 | 文件/模块 | 主要新增内容 |
-|------|----------|-------------|
-| 后端Model | be/model/buyer.py | receive_order, query_order, cancel_order, check_and_cancel_timeout_orders |
-| | be/model/seller.py | ship_order, query_store_orders |
-| | be/model/search.py | **新增搜索模块**（多范围搜索、分页、全文索引） |
-| 后端View | be/view/buyer.py, seller.py | 新增对应路由接口 |
-| | be/view/search.py | **新增搜索路由** |
-| | be/serve.py | 注册search蓝图 |
-| 前端Access | fe/access/buyer.py, seller.py | 新增对应访问方法 |
-| | fe/access/search.py | **新增Search类** |
-| 测试文件 | 7个测试文件 | test_ship_order, test_receive_order, test_query_order, test_cancel_order, test_timeout_order, test_search_books, test_additional_coverage |
-| API文档 | doc/additional_features.md | **新增完整API文档** |
+| 类型       | 文件/模块                         | 主要新增内容                                                                                                                                    |
+| -------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| 后端Model  | be/model/buyer.py             | receive_order, query_order, cancel_order, check_and_cancel_timeout_orders                                                                 |
+|          | be/model/seller.py            | ship_order, query_store_orders                                                                                                            |
+|          | be/model/search.py            | 新增搜索模块（多范围搜索、分页、全文索引）                                                                                                                     |
+| 后端View   | be/view/buyer.py, seller.py   | 新增对应路由接口                                                                                                                                  |
+|          | be/view/search.py             | 新增搜索路由                                                                                                                                    |
+|          | be/serve.py                   | 注册search蓝图                                                                                                                                |
+| 前端Access | fe/access/buyer.py, seller.py | 新增对应访问方法                                                                                                                                  |
+|          | fe/access/search.py           | 新增Search类                                                                                                                                 |
+| 测试文件     | 7个测试文件                        | test_ship_order, test_receive_order, test_query_order, test_cancel_order, test_timeout_order, test_search_books, test_additional_coverage |
+| API文档    | doc/additional_features.md    | 新增完整API文档                                                                                                                                 |
 
 ---
 
@@ -770,14 +889,47 @@ def query_order(self, user_id: str, order_id: str = None) -> (int, str, list):
     """查询订单"""
 ```
 
+**HTTP接口规范**
+
+- **URL**: `POST /buyer/query_order`
+- **Headers**: `token: <buyer_token>`
+- **请求参数**:
+```json
+{
+  "user_id": "buyer_user_id",
+  "order_id": "order_uuid"  // 可选，不传则查询所有订单
+}
+```
+- **成功响应** (200):
+```json
+{
+  "message": "ok",
+  "orders": [
+    {
+      "order_id": "xxx",
+      "store_id": "yyy",
+      "total_price": 100.00,
+      "status": "paid",
+      "created_at": "2025-12-17 10:30:00",
+      "details": [
+        {"book_id": "book1", "quantity": 2, "price": 50.00}
+      ]
+    }
+  ]
+}
+```
+- **错误响应**:
+  - 401: 授权失败
+  - 518: 订单不存在
+
 **功能描述：**
-- 支持查询单个订单详情
-- 支持查询用户所有历史订单
-- 返回订单的详细信息，包括订单状态、总价、创建时间和订单明细
+支持查询单个订单详情或用户所有历史订单，返回订单状态、总价、创建时间和订单明细。
 
 **实现逻辑：**
 
-1. **单订单查询**：当指定`order_id`时，返回该订单的详细信息
+首先，系统根据是否传入`order_id`参数判断查询类型。
+
+1. **单订单查询**：当指定`order_id`时，系统执行精确查询，返回该订单的详细信息。同时验证订单归属，确保用户只能查询自己的订单。
 ```python
 if order_id:
     cursor.execute(
@@ -787,7 +939,7 @@ if order_id:
     )
 ```
 
-2. **历史订单查询**：当不指定`order_id`时，返回用户所有订单
+2. **历史订单查询**：当不指定`order_id`时，系统查询该用户的所有历史订单，并按创建时间降序排列，最新订单排在最前。
 ```python
 else:
     cursor.execute(
@@ -797,7 +949,7 @@ else:
     )
 ```
 
-3. **订单详情关联查询**：对每个订单，查询其包含的图书详情
+3. **订单详情关联查询**：对每个订单，系统进一步查询order_details表，获取订单中包含的所有图书信息，包括书籍ID、购买数量和单价。
 ```python
 cursor.execute(
     "SELECT book_id, quantity, price FROM order_details WHERE order_id = %s",
@@ -839,7 +991,16 @@ def query_order(self, order_id: str = None) -> (int, list):
     return r.status_code, response_json.get("orders", [])
 ```
 
-**测试用例：** `/fe/test/test_query_order.py`
+**测试用例说明**
+
+测试文件：`fe/test/test_query_order.py`，包含4个测试场景：
+
+| 测试用例 | 测试场景 | 预期结果 |
+|---------|---------|----------|
+| test_query_single_order | 查询指定订单ID的订单详情 | 返回200状态码，正确返回该订单的详细信息（订单ID、商店、总价、状态、订单明细） |
+| test_query_all_orders | 不指定订单ID，查询用户所有历史订单 | 返回200状态码，返回用户的所有订单列表，按创建时间降序排列 |
+| test_query_non_exist_order | 查询不存在的订单ID | 返回空订单列表或错误提示 |
+| test_authorization | 验证只能查询自己的订单 | 用户A无法查询用户B的订单，保证数据隐私 |
 
 ---
 
@@ -852,14 +1013,36 @@ def cancel_order(self, user_id: str, order_id: str) -> (int, str):
     """买家取消订单"""
 ```
 
+**HTTP接口规范**
+
+- **URL**: `POST /buyer/cancel_order`
+- **Headers**: `token: <buyer_token>`
+- **请求参数**:
+```json
+{
+  "user_id": "buyer_user_id",
+  "order_id": "order_uuid"
+}
+```
+- **成功响应** (200):
+```json
+{
+  "message": "ok"
+}
+```
+- **错误响应**:
+  - 401: 授权失败（非订单买家）
+  - 518: 订单不存在
+  - 529: 订单状态不允许取消（已发货/已收货/已取消）
+
 **功能描述：**
-- 买家可以主动取消待支付或已支付的订单
-- 取消已支付订单时自动退款
-- 恢复商品库存
+买家可以主动取消待支付或已支付的订单。取消已支付订单时自动退款，恢复商品库存，通过事务保证数据一致性。
 
 **实现逻辑：**
 
-1. **订单验证与权限检查**：
+首先，系统验证订单存在性和用户权限。
+
+1. **订单验证与权限检查**：系统从orders表查询订单信息，获取买家ID、商店ID和订单状态。通过比对user_id，确保只有订单的买家本人才能执行取消操作。
 ```python
 cursor.execute(
     "SELECT user_id, store_id, status FROM orders WHERE order_id = %s",
@@ -872,13 +1055,13 @@ if buyer_id != user_id:
     return error.error_authorization_fail()
 ```
 
-2. **状态检查**：只有待支付或已支付的订单可以取消
+2. **状态检查**：只有处于`pending`或`paid`状态的订单才允许取消。
 ```python
 if status not in ['pending', 'paid']:
     return 529, "订单状态不允许取消"
 ```
 
-3. **退款处理**（事务保证）：如果是已支付订单，需要退款给买家
+3. **退款处理**（事务保证）：如果是已支付订单，退款给买家，同时从卖家账户扣款。
 ```python
 conn.start_transaction()
 
@@ -895,7 +1078,7 @@ if status == 'paid':
     )
 ```
 
-4. **库存恢复**：将订单中的商品库存返还
+4. **库存恢复**：查询订单详情，将订单中的商品库存返还。
 ```python
 cursor.execute(
     "SELECT book_id, quantity FROM order_details WHERE order_id = %s",
@@ -911,7 +1094,7 @@ for book_id, quantity in order_details:
     )
 ```
 
-5. **状态更新**：将订单状态更新为已取消
+5. **状态更新**：将订单状态更新为`cancelled`，并提交事务。
 ```python
 cursor.execute(
     "UPDATE orders SET status = 'cancelled' WHERE order_id = %s",
@@ -944,7 +1127,19 @@ def cancel_order(self, order_id: str) -> int:
     return r.status_code
 ```
 
-**测试用例：** `/fe/test/test_cancel_order.py`
+**测试用例说明**
+
+测试文件：`fe/test/test_cancel_order.py`，包含5个测试场景：
+
+| 测试用例 | 测试场景 | 预期结果 |
+|---------|---------|----------|
+| test_cancel_pending_order | 取消待支付订单 | 返回200状态码，订单状态变为cancelled，库存成功恢复 |
+| test_cancel_paid_order | 取消已支付订单 | 返回200状态码，自动退款给买家，从卖家账户扣款，库存恢复，订单状态变为cancelled |
+| test_cancel_shipped_order | 尝试取消已发货订单 | 返回529错误，订单状态不允许取消 |
+| test_stock_recovery | 验证库存恢复正确性 | 取消订单后，商品库存数量正确增加，与订单中的购买数量一致 |
+| test_authorization_error | 用户A尝试取消用户B的订单 | 返回401授权错误，防止越权操作 |
+
+**事务保证**：取消已支付订单时，退款、扣款、库存恢复、状态更新在同一MySQL事务中完成，确保数据一致性。
 
 ---
 
@@ -958,11 +1153,13 @@ def check_and_cancel_timeout_orders(self):
 ```
 
 **功能描述：**
-系统自动检查并取消超过30分钟未支付的订单，防止长时间占用库存。
+系统自动检查并取消超过30分钟未支付的订单，释放库存资源，避免长时间占用。
 
 **实现逻辑：**
 
-1. **查找超时订单**：查询创建时间超过30分钟且仍处于待支付状态的订单
+系统通过定时任务或手动触发的方式执行超时检查。
+
+1. **查找超时订单**：系统使用SQL查询，筛选出创建时间距今超过30分钟（使用`DATE_SUB(NOW(), INTERVAL 30 MINUTE)`计算）且状态仍为`pending`的订单。
 ```python
 cursor.execute(
     "SELECT order_id, user_id, store_id FROM orders "
@@ -971,7 +1168,7 @@ cursor.execute(
 timeout_orders = cursor.fetchall()
 ```
 
-2. **批量处理**：对每个超时订单恢复库存并取消
+2. **批量处理**：对每个超时订单，恢复其占用的库存，更新状态为`cancelled`。
 ```python
 for order_id, user_id, store_id in timeout_orders:
     # 恢复库存
@@ -997,7 +1194,16 @@ for order_id, user_id, store_id in timeout_orders:
 conn.commit()
 ```
 
-**测试用例：** `/fe/test/test_timeout_order.py`
+**测试用例说明**
+
+测试文件：`fe/test/test_timeout_order.py`，包含2个测试场景：
+
+| 测试用例 | 测试场景 | 预期结果 |
+|---------|---------|----------|
+| test_timeout_cancel | 创建订单后等待超时时间，触发自动取消 | 系统自动将超过30分钟未支付的订单状态更新为cancelled |
+| test_stock_recovery_after_timeout | 验证超时取消后库存恢复 | 订单中的商品库存成功恢复到下单前的数量 |
+
+**实现说明**：超时取消功能通过定时任务或手动触发`check_and_cancel_timeout_orders`方法实现，查询创建时间超过30分钟且状态仍为pending的订单，批量恢复库存并更新状态。
 
 ---
 
@@ -1013,15 +1219,54 @@ def search_books(
     """搜索图书"""
 ```
 
+**HTTP接口规范**
+
+- **URL**: `POST /search/books`
+- **请求参数**:
+```json
+{
+  "keyword": "三体",
+  "store_id": "store_001",  // 可选，不传则全站搜索
+  "page": 1,
+  "page_size": 20,
+  "search_scope": "all"  // 可选：title/author/tags/content/all
+}
+```
+- **成功响应** (200):
+```json
+{
+  "message": "ok",
+  "books": [
+    {
+      "book_id": "book123",
+      "title": "三体",
+      "author": "刘慈欣",
+      "publisher": "重庆出版社",
+      "price": 23.00,
+      "tags": "科幻 小说",
+      "stock_level": 100,  // 商店内搜索时返回
+      "store_price": 23.00   // 商店内搜索时返回
+    }
+  ],
+  "total": 156,
+  "page": 1,
+  "page_size": 20
+}
+```
+- **错误响应**:
+  - 400: 参数错误（关键字为空）
+  - 513: 商店不存在
+
 **功能描述：**
-- 支持多范围搜索：标题、作者、标签、内容、全部
-- 支持全站搜索和商店内搜索
-- 支持分页显示
-- 使用索引优化查询性能
+支持多范围搜索（标题、作者、标签、内容、全部），支持全站搜索和商店内搜索，支持分页显示。使用MySQL全文索引和MongoDB文本索引优化查询性能。
 
 **4.3.1 搜索范围实现**
 
+系统根据用户选择的`search_scope`参数，采用不同的搜索策略。
+
 **1) 标题/作者/标签搜索（使用LIKE模糊匹配）**
+
+对于标题、作者或标签的单字段搜索，系统使用SQL的LIKE操作符进行模糊匹配。关键字前后添加通配符`%`，实现包含匹配。
 
 ```python
 if search_scope in ["title", "author", "tags"]:
@@ -1037,7 +1282,7 @@ if search_scope in ["title", "author", "tags"]:
 
 **2) 内容搜索（使用MongoDB全文索引）**
 
-对于图书详细内容的搜索，采用MongoDB的文本索引，性能比正则表达式快100倍以上：
+对于图书详细内容（简介、目录、作者介绍）的搜索，系统采用MongoDB的文本索引技术。MongoDB存储了图书的BLOB数据，其文本索引支持中文分词和相关度评分，性能远优于正则表达式匹配。系统还针对关键字长度进行了优化：短关键字（2个字符以内）使用精确匹配，长关键字使用全文搜索，并按相关度评分排序。
 
 ```python
 elif search_scope == "content":
@@ -1065,6 +1310,8 @@ elif search_scope == "content":
 ```
 
 **3) 全部字段搜索（使用MySQL全文索引）**
+
+当用户选择全字段搜索时，系统使用MySQL的FULLTEXT全文索引，同时在标题、作者、标签三个字段中搜索。全文索引采用自然语言模式（NATURAL LANGUAGE MODE），支持中文分词和相关性排序，相比多个LIKE查询的OR组合，性能提升显著。
 
 ```python
 else:  # search_scope == "all"
@@ -1115,6 +1362,8 @@ def _ensure_text_index(self):
 
 **4.3.3 分页功能实现**
 
+分页功能避免了一次性加载大量搜索结果，提升了系统响应速度和用户体验。系统首先对分页参数进行校验，确保页码大于等于1，每页大小在1到100之间（默认20）。然后根据页码计算数据库查询的偏移量（offset），使用SQL的LIMIT和OFFSET子句实现分页查询。同时，系统会执行COUNT查询获取结果总数，供前端计算总页数和显示分页导航。
+
 ```python
 # 参数验证
 if page < 1:
@@ -1141,6 +1390,8 @@ return 200, "ok", books, total
 ```
 
 **4.3.4 商店内搜索与全站搜索**
+
+系统根据是否传入`store_id`参数，自动切换搜索范围。商店内搜索时，系统通过JOIN操作关联books表和store_inventory表，只返回该商店有库存的图书，并额外提供库存数量和商店定价信息，方便用户了解商品可购性。全站搜索则直接查询books表，返回所有匹配的图书信息。这种设计既满足了用户在特定商店浏览的需求，也支持跨商店的全局图书搜索。
 
 ```python
 if store_id:
@@ -1205,13 +1456,30 @@ def search_books(
     return r.status_code, response_json.get("books", []), response_json.get("total", 0)
 ```
 
-**测试用例：** `/fe/test/test_search_books.py`
+**测试用例说明**
+
+测试文件：`fe/test/test_search_books.py`，包含8个测试场景：
+
+| 测试用例 | 测试场景 | 预期结果 |
+|---------|---------|----------|
+| test_search_by_title | 按图书标题搜索 | 返回200状态码，返回标题包含关键字的图书列表 |
+| test_search_by_author | 按作者名搜索 | 返回200状态码，返回该作者的所有图书 |
+| test_search_by_tags | 按标签搜索 | 返回200状态码，返回包含指定标签的图书 |
+| test_search_by_content | 按内容全文搜索（MongoDB文本索引） | 返回200状态码，返回内容介绍中包含关键字的图书，按相关度排序 |
+| test_search_all_fields | 全字段搜索（MySQL FULLTEXT索引） | 返回200状态码，在标题、作者、标签中搜索，使用全文索引加速 |
+| test_pagination | 分页功能测试 | 正确返回指定页码和每页数量的结果，返回总数total用于前端分页 |
+| test_search_in_store | 商店内搜索 | 只返回指定商店的图书，并包含库存和商店价格信息 |
+| test_search_global | 全站搜索 | 返回所有商店中匹配的图书，不含库存信息 |
+
+**性能优化**：
+- MySQL FULLTEXT索引支持中文分词，搜索性能优于 LIKE 模糊查询
+- MongoDB文本索引支持相关度评分，自动按匹配度排序
+- 分页查询使用 LIMIT/OFFSET，避免一次性加载过多数据
 
 ---
-
 ##### 4.4 订单状态流转图
 
-本项目实现了完整的订单生命周期管理：
+订单生命周期管理：
 
 ```
 pending (待支付) 
@@ -1263,25 +1531,21 @@ def query_store_orders(self, user_id: str, store_id: str) -> (int, str, list):
 
 ## 最终测试结果
 
-在终端运行 `bash script/test.sh` 执行完整测试套件，最终测试结果如下：
-
+运行 `bash script/test.sh` 执行完整测试，最终测试结果如下：
 **测试执行过程：**
+![](attachment/c4f07bda4087d1f06d67f092898fd9e0.jpg)
+![](attachment/bc6a96f476338a64cf19c543eecb3e92.png)
 
-![最终测试运行1](attachment/test_run_1.png)
-
-![最终测试运行2](attachment/test_run_2.png)
-
-**最终测试结果总览：**
-- 总测试用例数：**75个**
-- 全部通过：**75 passed**
-- 执行时间：338.62s
+**最终测试结果：**
+- **122 passed**
+- 执行时间：390.12s
 - 最终代码覆盖率：**95%**
 
 **详细覆盖率报告：**
 
-![最终覆盖率详情](attachment/coverage_detail.png)
+![](attachment/ee3b63b59906915a145c9b93897aea41.jpg)
 
-所有测试用例全部通过，完整实现了基础功能（60%）和附加功能（40%），整体代码覆盖率达到95%。
+所有测试用例通过，整体代码覆盖率95%。
 
 ---
 
@@ -1343,66 +1607,57 @@ except Exception:
     conn.rollback()
 ```
 
-#### 5.4 高测试覆盖率
+#### 5.4 分工协作
 
-**测试文件统计：**
+本项目采用基于Git分支的协作开发模式，通过GitHub进行版本管理和团队协作。小组成员分工明确，各自在独立分支上完成开发任务后合并到主分支。
 
-| 测试类型 | 测试文件 | 测试用例数 |
-|---------|---------|-----------|
-| 基础功能（60%） | 8个文件 | 30+ 用例 |
-| 附加功能（40%） | 8个文件 | 20+ 用例 |
-| 总计 | 16个文件 | 50+ 用例 |
+![](attachment/5bc3765caecfc44b5136ff99d6b8ede8.png)
+**协作流程：**
 
-**测试覆盖率：95%**
+1. **分支策略**：采用功能分支开发模式
+   - `main` 分支：稳定的主分支，用于版本发布
+   - `feature/first-60%` 分支：前60%基础功能开发
+   - `feature/remaining-40%` 分支：后40%扩展功能开发
 
-**测试用例列表：**
-- `test_register.py` - 用户注册测试
-- `test_login.py` - 用户登录测试
-- `test_password.py` - 修改密码测试
-- `test_add_funds.py` - 账户充值测试
-- `test_create_store.py` - 创建商店测试
-- `test_add_book.py` - 添加图书测试
-- `test_add_stock_level.py` - 增加库存测试
-- `test_new_order.py` - 创建订单测试
-- `test_payment.py` - 订单支付测试
-- `test_ship_order.py` - **卖家发货测试（新增）**
-- `test_receive_order.py` - **买家收货测试（新增）**
-- `test_query_order.py` - **订单查询测试（新增）**
-- `test_cancel_order.py` - **取消订单测试（新增）**
-- `test_timeout_order.py` - **超时订单测试（新增）**
-- `test_search_books.py` - **图书搜索测试（新增）**
-- `test_additional_coverage.py` - **附加覆盖率测试（新增）**
-- `test_bench.py` - 性能测试
+2. **开发流程**：
+   - 各成员在自己的功能分支上独立开发和测试
+   - 完成功能开发后，通过Pull Request方式合并到主分支
+   - 合并前进行代码审查，确保代码质量
+   - 合并后在主分支打标签，标记重要版本节点
 
-**运行测试命令：**
-```bash
-bash script/test.sh
-```
-
+3. **协作特点**：
+   - 并行开发，互不干扰，提高开发效率
+   - 通过分支隔离，降低代码冲突风险
+   - 合并时保留完整的开发历史，便于追溯和回滚
+  
+![](attachment/d6039210efd18ed318635da6c5a8ea19.png)
+  
+网络协作图展示了项目的分支合并历史：
+- 12月11日：`feature/first-60%` 分支合并到主分支，完成前60%功能
+- 12月17日：`feature/remaining-40%` 分支合并到主分支，完成后40%功能
 #### 5.5 版本控制实践
 
-**Git使用规范：**
+本项目使用Git进行版本控制，通过标签（Tag）管理重要的版本里程碑，实现了规范的版本发布流程。
+![](attachment/c1ebaa523006ece8102599966a01a0e3.png)
+**版本说明：**
 
-1. **分支管理策略**
-   - `main`分支：稳定发布版本
-   - `dev`分支：开发版本
-   - `feature/*`分支：功能开发分支
+**v0.6 版本（基础功能版本）**
+- **实现内容**：完成前60%的基础功能
+  - 用户权限接口：注册、登录、登出、注销
+  - 买家用户接口：账户充值、下单、付款
+  - 卖家用户接口：创建店铺、添加书籍信息、库存管理
+  - 数据库设计：完成核心表结构设计，使用PostgreSQL存储结构化数据
+- **测试状态**：通过所有基础功能测试用例
+- **发布说明**：此版本提供完整的电商基础交易流程，为后续功能扩展奠定基础
 
-2. **提交规范**
-   - 使用规范的commit message格式
-   - 每个功能完成后及时提交
-   - 关键节点打tag标记
-
-3. **协作流程**
-   - Pull Request审核机制
-   - 代码冲突及时解决
-   - 定期合并到主分支
-
-**关键提交节点：**
-- v1.0：基础60%功能完成
-- v1.5：数据库迁移到MySQL+MongoDB
-- v2.0：全部功能完成并通过测试
-
+**v1.0 版本（完整功能版本）**
+- **新增内容**：在v0.6基础上增加后40%的扩展功能
+  - 订单流程扩展：发货、收货功能
+  - 图书搜索：支持全站/店铺内搜索，按标题/标签/内容检索，分页显示
+  - 订单管理：历史订单查询、订单取消（手动取消+超时自动取消）
+  - 性能优化：添加全文索引优化搜索性能
+- **测试状态**：通过全部功能测试用例，测试覆盖率达到95%
+- **发布说明**：完整实现在线书店的所有核心功能，系统稳定
 #### 5.6 数据库索引优化
 
 **已创建的索引：**
@@ -1437,156 +1692,81 @@ bash script/test.sh
 
 #### 5.7 测试代码Bug发现与修复建议
 
-**Bug 1: test_repeat_pay() 未真正测试重复支付**
+##### Bug 1: test_add_book.py-test_error_non_exist_user_id 测试逻辑错误
 
-**位置：** `fe/test/test_payment.py` 的 `test_repeat_pay()`方法
+**文件位置**: test_add_book.py第 45-50 行
 
-**问题描述：** 
-测试名称为"重复支付测试"，但实际上只执行了一次支付操作，没有真正测试重复支付的情况。
-
-**原有代码：**
+**问题代码**:
 ```python
-def test_repeat_pay(self):
-    code = self.buyer.add_funds(self.total_price)
-    assert code == 200
-    code = self.buyer.payment(self.order_id)
-    assert code == 200
-    # 测试结束，未进行第二次支付
+def test_error_non_exist_user_id(self):
+    for b in self.books:
+        # non exist user id
+        self.seller.seller_id = self.seller.seller_id + "_x"
+        code = self.seller.add_book(self.store_id, 0, b)
+        assert code != 200
+```
+**问题描述**:  
+在循环内部修改 self.seller.seller_id，导致每次迭代都会累加 `"_x"` 后缀（如 `id_x_x_x...`），而不是测试同一个"不存在的用户ID"。
+
+**修复建议**:
+```python
+def test_error_non_exist_user_id(self):
+    self.seller.seller_id = self.seller.seller_id + "_x"  # 移到循环外
+    for b in self.books:
+        code = self.seller.add_book(self.store_id, 0, b)
+        assert code != 200
+```
+##### Bug 2: gen_book_data.py - buy_num=0 边界情况处理不当
+
+**文件位置**: gen_book_data.py第 43-49 行
+
+**问题代码**:
+```python
+for bk in book_id_exist:
+    stock_level = book_id_stock_level[bk.id]
+    if stock_level > 1:
+        buy_num = random.randint(1, stock_level)
+    else:
+        buy_num = 0  # 问题：stock_level=1 时，buy_num=0
+```
+**问题描述**:  
+当 low_stock_level=False 时，stock_level的范围是 `[2, 100]`，但如果逻辑修改或边界条件变化导致 stock_level=1，则buy_num 会被设为 0，可能创建购买数量为 0 的订单。
+
+**修复建议**:
+
+```python
+if stock_level >= 1:
+    buy_num = random.randint(1, stock_level)
+else:
+    buy_num = 1  # 或抛出异常
+```
+##### Bug 3: - 异常信息丢失，无法调试
+
+**文件位置**: test_bench.py第 4-8 行
+
+**问题代码**:
+```python
+def test_bench():
+    try:
+        run_bench()
+    except Exception as e:
+        assert 200 == 100, "test_bench过程出现异常"
+```
+**问题描述**:  
+捕获了异常e但没有使用，原始错误信息被丢弃。当测试失败时，开发者无法知道具体发生了什么异常。
+
+**修复建议**:
+```python
+import pytest
+
+def test_bench():
+    try:
+        run_bench()
+    except Exception as e:
+        pytest.fail(f"test_bench过程出现异常: {e}")
 ```
 
-**修复建议：**
-```python
-def test_repeat_pay(self):
-    # 第一次支付应该成功
-    code = self.buyer.add_funds(self.total_price)
-    assert code == 200
-    code = self.buyer.payment(self.order_id)
-    assert code == 200
-    
-    # 第二次重复支付应该失败（订单已支付）
-    code = self.buyer.payment(self.order_id)
-    assert code != 200  # 应返回错误码
-```
-
-**影响：** 未能覆盖重复支付的边界情况，可能导致业务逻辑漏洞。
-
 ---
-
-### 6. 测试结果与覆盖率分析
-
-#### 6.1 基础功能测试（60%）
-
-**测试通过情况：**
-用户注册、登录、登出、注销 - 全部通过
-买家充值、下单、付款 - 全部通过
-卖家创建店铺、添加图书、增加库存 - 全部通过
-
-**测试用例统计：**
-- `test_register.py`: 5个测试用例
-- `test_login.py`: 4个测试用例
-- `test_password.py`: 3个测试用例
-- `test_add_funds.py`: 3个测试用例
-- `test_create_store.py`: 2个测试用例
-- `test_add_book.py`: 3个测试用例
-- `test_add_stock_level.py`: 2个测试用例
-- `test_new_order.py`: 5个测试用例
-- `test_payment.py`: 6个测试用例
-
-#### 6.2 附加功能测试（40%）
-
-以下为新增的测试用例，用于验证40%附加功能的实现：
-
-**测试通过情况：**
-
-**测试用例统计：**
-- `test_ship_order.py`: 3个测试用例
-  - 正常发货
-  - 非卖家发货（权限测试）
-  - 未支付订单发货（状态测试）
-
-- `test_receive_order.py`: 3个测试用例
-  - 正常收货
-  - 非买家收货（权限测试）
-  - 未发货订单收货（状态测试）
-
-- `test_query_order.py`: 4个测试用例
-  - 查询单个订单
-  - 查询所有订单
-  - 查询不存在的订单
-  - 买家/卖家订单查询权限测试
-
-- `test_cancel_order.py`: 5个测试用例
-  - 取消待支付订单
-  - 取消已支付订单（验证退款）
-  - 取消已发货订单（应失败）
-  - 验证库存恢复
-  - 非买家取消订单（权限测试）
-
-- `test_timeout_order.py`: 2个测试用例
-  - 超时订单自动取消
-  - 验证库存恢复
-
-- `test_search_books.py`: 8个测试用例
-  - 按标题搜索
-  - 按作者搜索
-  - 按标签搜索
-  - 内容全文搜索
-  - 分页功能测试
-  - 商店内搜索
-  - 全站搜索
-  - 空结果处理
-
-- `test_additional_coverage.py`: 多个补充测试用例
-  - 覆盖各模块边界情况
-  - 异常处理测试
-  - 提升代码覆盖率
-
-
-#### 6.3 整体测试覆盖率
-
-**测试覆盖率变化：**
-- 完成前60%基础功能时：**96%**
-- 完成后40%附加功能后：**95%**（新增代码增加了代码总量）
-
-测试覆盖率详情见"最终测试结果"部分的截图。所有测试用例全部通过，代码覆盖率达到95%。
-
----
-
-#### 7.2 需要改进的地方
-
-**主要改进方向：**
-
- **ER图未绘制**
-   - 当前2.3节只有文字描述，缺少实际的ER图
-   - 需要使用工具绘制完整的实体关系图
-   - 包含所有实体（User、Store、Book、Order等）和关系
-
- **重复支付幂等性问题**
-   - `payment()`方法未检查订单是否已支付
-   - 可能导致重复扣款
-   - 需要在支付前检查订单状态
-. **库存并发控制问题**  **建议优化**
-   - 下单时的库存扣减未加锁
-   - 高并发下可能超卖
-   - 建议使用乐观锁（条件更新）
-
- **数据库连接池未使用**
-   - 每次操作都创建新连接并关闭
-   - 高并发时性能差
-   - 建议使用连接池（如mysql.connector.pooling）
-
-**测试边界情况覆盖不足**
-   - 缺少并发测试（多用户抢购）
-   - 缺少大数据量测试
-   - 缺少异常情况测试（数据库中断等）
-
-**性能测试报告不完整**
-   - `test_bench.py`未详细说明测试场景
-   - 缺少TPS、响应时间等指标
-   - 缺少优化前后对比
-
-
-
 ## 附录
 
 ### A. 数据库表结构DDL
@@ -1694,11 +1874,68 @@ db.book_details.createIndex(
 - `doc/seller.md` - 卖家接口
 - `doc/additional_features.md` - 附加功能接口
 
----
+### D. **测试用例列表**
+- `test_register.py` - 用户注册测试
+- `test_login.py` - 用户登录测试
+- `test_password.py` - 修改密码测试
+- `test_add_funds.py` - 账户充值测试
+- `test_create_store.py` - 创建商店测试
+- `test_add_book.py` - 添加图书测试
+- `test_add_stock_level.py` - 增加库存测试
+- `test_new_order.py` - 创建订单测试
+- `test_payment.py` - 订单支付测试
+- `test_ship_order.py` - **卖家发货测试（新增）**
+- `test_receive_order.py` - **买家收货测试（新增）**
+- `test_query_order.py` - **订单查询测试（新增）**
+- `test_cancel_order.py` - **取消订单测试（新增）**
+- `test_timeout_order.py` - **超时订单测试（新增）**
+- `test_search_books.py` - **图书搜索测试（新增）**
+- `test_additional_coverage.py` - **附加覆盖率测试（新增）**
+- `test_bench.py` - 性能测试
 
-**小组成员：**
-- 10235501452 肖璟仪（负责后40%附加功能）
-- 10235501435 张凯诚（负责前60%基础功能）
-- 共同完成：数据库架构设计与优化、项目整体测试与调试、实验报告撰写
+**新增测试用例统计：**
+- `test_ship_order.py`: 3个测试用例
+  - 正常发货
+  - 非卖家发货（权限测试）
+  - 未支付订单发货（状态测试）
+
+- `test_receive_order.py`: 3个测试用例
+  - 正常收货
+  - 非买家收货（权限测试）
+  - 未发货订单收货（状态测试）
+
+- `test_query_order.py`: 4个测试用例
+  - 查询单个订单
+  - 查询所有订单
+  - 查询不存在的订单
+  - 买家/卖家订单查询权限测试
+
+- `test_cancel_order.py`: 5个测试用例
+  - 取消待支付订单
+  - 取消已支付订单（验证退款）
+  - 取消已发货订单（应失败）
+  - 验证库存恢复
+  - 非买家取消订单（权限测试）
+
+- `test_timeout_order.py`: 2个测试用例
+  - 超时订单自动取消
+  - 验证库存恢复
+
+- `test_search_books.py`: 8个测试用例
+  - 按标题搜索
+  - 按作者搜索
+  - 按标签搜索
+  - 内容全文搜索
+  - 分页功能测试
+  - 商店内搜索
+  - 全站搜索
+  - 空结果处理
+
+- `test_additional_coverage.py`: 多个补充测试用例
+  - 覆盖各模块边界情况
+  - 异常处理测试
+  - 提升代码覆盖率
+
+---
 
 **仓库链接：** https://github.com/ezzzb7/bookstore2
