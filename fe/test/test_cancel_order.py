@@ -14,12 +14,12 @@ class TestCancelOrder:
         self.buyer_id = "test_cancel_buyer_{}".format(str(uuid.uuid1()))
         self.password = self.seller_id
         
-        # 注册卖家和买家
-        self.seller = register_new_seller(self.seller_id, self.password)
-        self.buyer = register_new_buyer(self.buyer_id, self.password)
+        # 生成图书数据(内部会注册seller)
+        self.gen_book = GenBook(self.seller_id, self.store_id)
+        self.seller = self.gen_book.seller
         
-        # 生成图书数据，使用不同的seller_id避免冲突
-        self.gen_book = GenBook(self.seller_id + "_gen", self.store_id)
+        # 注册买家
+        self.buyer = register_new_buyer(self.buyer_id, self.password)
         
         yield
 
@@ -120,10 +120,10 @@ class TestCancelOrder:
         assert code == 200
         
         # 发货
-        code = self.seller.ship_order(order_id)
+        code = self.gen_book.seller.ship_order(order_id)
         assert code == 200
         
-        # 尝试取消订单（已发货，不允许）
+        # 尝试取消已发货订单（应该失败）
         code = self.buyer.cancel_order(order_id)
         assert code != 200
 

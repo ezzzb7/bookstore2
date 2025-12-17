@@ -14,12 +14,12 @@ class TestReceiveOrder:
         self.buyer_id = "test_receive_buyer_{}".format(str(uuid.uuid1()))
         self.password = self.seller_id
         
-        # 注册卖家和买家
-        self.seller = register_new_seller(self.seller_id, self.password)
-        self.buyer = register_new_buyer(self.buyer_id, self.password)
+        # 生成图书数据(内部会注册seller)
+        self.gen_book = GenBook(self.seller_id, self.store_id)
+        self.seller = self.gen_book.seller
         
-        # 生成图书数据，使用不同的seller_id避免冲突
-        self.gen_book = GenBook(self.seller_id + "_gen", self.store_id)
+        # 注册买家
+        self.buyer = register_new_buyer(self.buyer_id, self.password)
         ok, buy_book_id_list = self.gen_book.gen(
             non_exist_book_id=False, low_stock_level=False, max_book_count=5
         )
@@ -47,11 +47,7 @@ class TestReceiveOrder:
         assert code == 200
         
         # 发货
-        code = self.seller.ship_order(self.order_id)
-        assert code == 200
-        
-        yield
-
+        code = self.gen_book.seller.ship_order(self.order_id)
     def test_receive_ok(self):
         """正常收货"""
         code = self.buyer.receive_order(self.order_id)

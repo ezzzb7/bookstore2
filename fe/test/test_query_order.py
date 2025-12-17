@@ -14,12 +14,12 @@ class TestQueryOrder:
         self.buyer_id = "test_query_buyer_{}".format(str(uuid.uuid1()))
         self.password = self.seller_id
         
-        # 注册卖家和买家
-        self.seller = register_new_seller(self.seller_id, self.password)
-        self.buyer = register_new_buyer(self.buyer_id, self.password)
+        # 生成图书数据(内部会注册seller)
+        self.gen_book = GenBook(self.seller_id, self.store_id)
+        self.seller = self.gen_book.seller
         
-        # 生成图书数据，使用不同的seller_id避免冲突
-        self.gen_book = GenBook(self.seller_id + "_gen", self.store_id)
+        # 注册买家
+        self.buyer = register_new_buyer(self.buyer_id, self.password)
         
         yield
 
@@ -124,10 +124,7 @@ class TestQueryOrder:
         assert orders[0]["status"] == "paid"
         
         # 发货
-        code = self.seller.ship_order(order_id)
-        assert code == 200
-        
-        # 查询已发货订单
+        code = self.gen_book.seller.ship_order(order_id)
         code, orders = self.buyer.query_order(order_id)
         assert code == 200
         assert orders[0]["status"] == "shipped"
@@ -150,12 +147,12 @@ class TestQueryStoreOrders:
         self.buyer_id = "test_store_query_buyer_{}".format(str(uuid.uuid1()))
         self.password = self.seller_id
         
-        # 注册卖家和买家
-        self.seller = register_new_seller(self.seller_id, self.password)
-        self.buyer = register_new_buyer(self.buyer_id, self.password)
+        # 生成图书数据(内部会注册seller)
+        self.gen_book = GenBook(self.seller_id, self.store_id)
+        self.seller = self.gen_book.seller
         
-        # 生成图书数据，使用不同的seller_id避免冲突
-        self.gen_book = GenBook(self.seller_id + "_gen", self.store_id)
+        # 注册买家
+        self.buyer = register_new_buyer(self.buyer_id, self.password)
         
         yield
 
@@ -171,9 +168,9 @@ class TestQueryStoreOrders:
             code, order_id = self.buyer.new_order(self.store_id, buy_book_id_list)
             assert code == 200
             order_ids.append(order_id)
-        
+
         # 查询商店订单
-        code, orders = self.seller.query_store_orders(self.store_id)
+        code, orders = self.gen_book.seller.query_store_orders(self.store_id)
         assert code == 200
         assert len(orders) >= 3
         

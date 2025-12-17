@@ -245,3 +245,92 @@ class TestSearchBooks:
         assert code == 200
         assert total == 0
         assert len(books) == 0
+    
+    def test_search_content_short_keyword(self):
+        """测试短关键字的内容搜索（2字符或更少）"""
+        # 短关键字使用精确匹配
+        code, books, total = self.search.search_books(
+            keyword="a",
+            search_scope="content",
+            page=1,
+            page_size=10
+        )
+        assert code == 200
+        assert total >= 0
+        
+        # 两个字符
+        code, books, total = self.search.search_books(
+            keyword="ab",
+            search_scope="content",
+            page=1,
+            page_size=10
+        )
+        assert code == 200
+        assert total >= 0
+    
+    def test_search_content_long_keyword(self):
+        """测试长关键字的内容搜索（超过2字符）"""
+        # 长关键字使用文本搜索
+        code, books, total = self.search.search_books(
+            keyword="introduction",
+            search_scope="content",
+            page=1,
+            page_size=10
+        )
+        assert code == 200
+        assert total >= 0
+    
+    def test_search_in_nonexist_store(self):
+        """在不存在的商店中搜索"""
+        fake_store_id = "fake_store_" + str(uuid.uuid1())
+        
+        code, books, total = self.search.search_books(
+            keyword="test",
+            store_id=fake_store_id,
+            search_scope="title"
+        )
+        assert code == 200
+        assert total == 0
+        assert len(books) == 0
+    
+    def test_search_all_scopes(self):
+        """测试所有搜索范围"""
+        scopes = ["all", "title", "author", "tags", "content"]
+        
+        for scope in scopes:
+            code, books, total = self.search.search_books(
+                keyword="book",
+                page=1,
+                page_size=10,
+                search_scope=scope
+            )
+            assert code == 200
+            assert total >= 0
+    
+    def test_search_chinese_keyword(self):
+        """测试中文关键字搜索"""
+        # 测试中文关键字
+        code, books, total = self.search.search_books(
+            keyword="中文",
+            search_scope="all"
+        )
+        assert code == 200
+        assert total >= 0
+    
+    def test_search_mixed_language_keyword(self):
+        """测试中英文混合关键字"""
+        code, books, total = self.search.search_books(
+            keyword="test测试",
+            search_scope="all"
+        )
+        assert code == 200
+        assert total >= 0
+    
+    def test_search_with_spaces(self):
+        """测试包含空格的关键字"""
+        code, books, total = self.search.search_books(
+            keyword="book store",
+            search_scope="title"
+        )
+        assert code == 200
+        assert total >= 0
